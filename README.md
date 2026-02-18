@@ -15,7 +15,7 @@ Features:
 I built this app to remind myself to drink water because I forget to stay hydrated when I am deeply focused on work or study. It helps me keep my energy and focus consistent while I am on my PC and tracks the time I spend on work and study. It also gives me practice in coding and product development.
 
 ## Install
-Installers are located in the `dist` folder after you build the app (or under GitHub Releases if you download them there).
+Installers are located under GitHub Releases, you can download and try it in your Windows or Mac.
 
 ### macOS (DMG):
 1) Download `Focus Mode-<version>-arm64.dmg`.
