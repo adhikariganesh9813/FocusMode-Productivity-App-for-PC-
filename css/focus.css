@@ -165,9 +165,6 @@
         font-size: 0.9rem;
     }
 }
-        box-sizing: border-box;
-    }
-}
 
 /* Extra-small phones: make the clock a bit smaller */
 @media (max-width: 420px) {
@@ -314,8 +311,8 @@
     transition: stroke-dashoffset 0.5s ease;
     transform: rotate(-90deg);
     transform-origin: 50% 50%;
-    stroke-dasharray: 326.73;
-    stroke-dashoffset: 326.73;
+    stroke-dasharray: 194.78;
+    stroke-dashoffset: 194.78;
     stroke-linecap: round;
 }
 
@@ -428,7 +425,6 @@
 
 .insights-chart {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
     gap: 6px;
     align-items: end;
     min-height: 140px;
@@ -577,12 +573,7 @@
     flex-wrap: wrap;
 }
 
-.settings-section {
-    background: white;
-    padding: 40px;
-    border-radius: 20px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-}
+/* settings-section styles consolidated above (line 523) */
 
 .settings-section h2,
 .settings-section h3 {

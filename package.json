@@ -1,32 +1,43 @@
 {
   "name": "focus-mode-desktop",
   "productName": "Focus Mode",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "main": "main.js",
   "scripts": {
     "start": "env -u ELECTRON_RUN_AS_NODE electron .",
     "test": "node --test",
     "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac --arm64",
-    "dist:win": "electron-builder --win"
+    "dist:mac": "electron-builder --mac --x64",
+    "dist:mac:arm": "electron-builder --mac --arm64",
+    "dist:mac:universal": "electron-builder --mac --universal",
+    "dist:win": "electron-builder --win --x64"
   },
   "devDependencies": {
     "electron": "^32.1.2",
-    "electron-builder": "^24.13.3",
-    "png-to-ico": "^3.0.1"
+    "electron-builder": "^24.13.3"
   },
   "dependencies": {},
   "build": {
     "appId": "com.focusmode.app",
     "productName": "Focus Mode",
     "files": [
-      "**/*"
+      "**/*",
+      "!tests",
+      "!docs",
+      "!models",
+      "!scripts",
+      "!build/icon.iconset",
+      "!.github",
+      "!.DS_Store"
     ],
     "asar": true,
     "mac": {
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        }
       ],
       "icon": "build/icon.icns",
       "category": "public.app-category.productivity",

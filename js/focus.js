@@ -69,7 +69,9 @@ function initializeFocusMode() {
     const focusTotalsRange = document.getElementById('focusTotalsRange');
     const dailyRangeControls = document.getElementById('dailyRangeControls');
     const dailyRangeButtons = dailyRangeControls ? dailyRangeControls.querySelectorAll('.nav-btn') : [];
+    const dailyAverageEl = document.getElementById('dailyAverage');
     const weeklyAverageEl = document.getElementById('weeklyAverage');
+    const monthlyAverageEl = document.getElementById('monthlyAverage');
 
     let currentChartView = 'daily';
     let sessionHistory = [];
@@ -97,14 +99,6 @@ function initializeFocusMode() {
     function saveStats() {
         if (window.FocusStorage && window.FocusStorage.saveRuntimeState) {
             return window.FocusStorage.saveRuntimeState({
-                currentSessionStartTime: sessionStats.currentSessionStartTime,
-                currentSessionInitialTime: sessionStats.currentSessionInitialTime,
-                pausedAt: sessionStats.pausedAt,
-                accumulatedPauseTime: sessionStats.accumulatedPauseTime
-            });
-        }
-        if (window.FocusStorage && window.FocusStorage.saveAggregates) {
-            return window.FocusStorage.saveAggregates({
                 currentSessionStartTime: sessionStats.currentSessionStartTime,
                 currentSessionInitialTime: sessionStats.currentSessionInitialTime,
                 pausedAt: sessionStats.pausedAt,
@@ -148,7 +142,7 @@ function initializeFocusMode() {
 
     function formatDurationShort(seconds) {
         const totalSeconds = Math.max(0, Math.round(seconds || 0));
-        const minutes = Math.round(totalSeconds / 60);
+        const minutes = Math.floor(totalSeconds / 60);
         if (minutes <= 0) return '0m';
         if (minutes < 60) return `${minutes}m`;
         const hours = totalSeconds / 3600;
@@ -197,14 +191,12 @@ function initializeFocusMode() {
 
     function buildYearlyChartData(sessions) {
         const currentYear = new Date().getFullYear();
-        const startYear = currentYear;
-        const endYear = currentYear + 9;
-        const totals = new Map();
-        for (let year = startYear; year <= endYear; year++) {
-            totals.set(year, 0);
-        }
-
         const fallbackMap = sessionStats.activityByYear || {};
+        // Find earliest year with data, default to currentYear-4
+        const dataYears = Object.keys(fallbackMap).map(Number).filter(Number.isFinite);
+        const earliestDataYear = dataYears.length ? Math.min(...dataYears) : currentYear;
+        const startYear = Math.min(earliestDataYear, currentYear - 4);
+        const endYear = Math.max(currentYear + 1, startYear + 9);
         const data = [];
         for (let year = startYear; year <= endYear; year++) {
             data.push({ label: String(year), seconds: fallbackMap[String(year)] || 0, yearKey: String(year) });
@@ -266,19 +258,39 @@ function initializeFocusMode() {
         });
 
         updateRangeHeader(data);
-        updateWeeklyAverage(data);
+        updateAverages(data);
     }
 
-    function updateWeeklyAverage(data) {
-        if (!weeklyAverageEl) return;
-        if (currentChartView !== 'daily') {
-            weeklyAverageEl.style.display = 'none';
-            return;
-        }
-        weeklyAverageEl.style.display = 'inline-flex';
+    function updateAverages(data) {
+        const showAverages = currentChartView === 'daily';
+        if (dailyAverageEl) dailyAverageEl.style.display = showAverages ? 'inline-flex' : 'none';
+        if (weeklyAverageEl) weeklyAverageEl.style.display = showAverages ? 'inline-flex' : 'none';
+        if (monthlyAverageEl) monthlyAverageEl.style.display = showAverages ? 'inline-flex' : 'none';
+        if (!showAverages) return;
+
         const totalSeconds = data.reduce((sum, item) => sum + (item.seconds || 0), 0);
-        const avgSeconds = data.length ? Math.round(totalSeconds / data.length) : 0;
-        weeklyAverageEl.textContent = `Weekly Avg: ${formatDurationCompact(avgSeconds)}`;
+
+        // Daily average: total divided by number of days in the view
+        const dailyAvgSeconds = data.length ? Math.round(totalSeconds / data.length) : 0;
+        if (dailyAverageEl) dailyAverageEl.textContent = `Daily Avg: ${formatDurationCompact(dailyAvgSeconds)}`;
+
+        // Weekly average: total for this 7-day window
+        if (weeklyAverageEl) weeklyAverageEl.textContent = `Weekly Total: ${formatDurationCompact(totalSeconds)}`;
+
+        // Monthly average: compute from all days in this month
+        const allDayData = sessionStats.activityByDay || {};
+        const now = new Date();
+        const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        let monthTotal = 0;
+        let monthDays = 0;
+        Object.keys(allDayData).forEach(key => {
+            if (key.startsWith(monthPrefix)) {
+                monthTotal += allDayData[key] || 0;
+                monthDays++;
+            }
+        });
+        const monthlyAvgSeconds = monthDays > 0 ? Math.round(monthTotal / monthDays) : 0;
+        if (monthlyAverageEl) monthlyAverageEl.textContent = `Monthly Avg: ${formatDurationCompact(monthlyAvgSeconds)}`;
     }
 
     function updateRangeHeader(data) {
@@ -324,10 +336,12 @@ function initializeFocusMode() {
     }
 
     // Update progress ring
+    const PROGRESS_CIRCUMFERENCE = 2 * Math.PI * 31; // matches SVG circle r=31 ≈ 194.78
+
     function updateProgressRing() {
         if (!sessionStats.currentSessionStartTime || sessionStats.currentSessionInitialTime === 0) {
             progressPercentEl.textContent = '0%';
-            progressRingCircle.style.strokeDashoffset = 326.73;
+            progressRingCircle.style.strokeDashoffset = PROGRESS_CIRCUMFERENCE;
             currentSessionTimeEl.textContent = formatTimeStats(lastSessionSeconds);
             return;
         }
@@ -338,14 +352,11 @@ function initializeFocusMode() {
         
         progressPercentEl.textContent = `${Math.round(progressClamped)}%`;
         
-        const circumference = 326.73;
-        const offset = circumference - (progressClamped / 100) * circumference;
+        const offset = PROGRESS_CIRCUMFERENCE - (progressClamped / 100) * PROGRESS_CIRCUMFERENCE;
         progressRingCircle.style.strokeDashoffset = offset;
 
         // Show the duration of the last completed session
         currentSessionTimeEl.textContent = formatTimeStats(lastSessionSeconds);
-        
-        // Keep total focus time static; it updates only when a session completes.
     }
 
     // Update motivation message based on stats
@@ -485,6 +496,11 @@ function initializeFocusMode() {
             resetDailyStats({ preserveSession });
             sessionStats.lastStatsDate = todayKey;
             sessionStats.lastSessionDate = todayKey;
+            // Recalculate streak immediately from aggregates to avoid stale display
+            if (window.FocusAnalytics && window.FocusAnalytics.getStreaks && Array.isArray(sessionHistory)) {
+                const streaks = window.FocusAnalytics.getStreaks(sessionHistory);
+                sessionStats.currentStreak = streaks.current || 0;
+            }
             if (persist) {
                 saveStats();
             }
@@ -535,9 +551,7 @@ function initializeFocusMode() {
             if (window.FocusStorage && window.FocusStorage.recordCompletedSession) {
                 await window.FocusStorage.recordCompletedSession(sessionRecord);
             }
-            if (Array.isArray(sessionHistory)) {
-                sessionHistory.push(sessionRecord);
-            }
+            // Reload from storage to get authoritative state (don't push locally — avoids duplicates)
             await loadSessionHistory();
             updateStatsDisplay();
             updateProgressRing();
@@ -602,9 +616,10 @@ function initializeFocusMode() {
     // Converts seconds back into HH:MM:SS format for display
     // Added padStart to always show two digits (e.g., 01:05:08)
     function formatTime(seconds) {
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const remainingSeconds = seconds % 60;
+        const clamped = Math.max(0, seconds);
+        const hours = Math.floor(clamped / 3600);
+        const minutes = Math.floor((clamped % 3600) / 60);
+        const remainingSeconds = clamped % 60;
         return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
     }
 
@@ -1080,13 +1095,14 @@ function initializeFocusMode() {
 
             // Prefer synchronous unlock if we have the actual event
             tryUnlock(!!event);
-
-            if (soundAllowBtn) {
-                soundAllowBtn.addEventListener('click', function(e) {
-                    unlockAudio(e, true);
-                });
-            }
         }
+
+    // Attach soundAllowBtn listener once, outside unlockAudio to prevent duplicate listeners
+    if (soundAllowBtn) {
+        soundAllowBtn.addEventListener('click', function(e) {
+            unlockAudio(e, true);
+        });
+    }
 
     // Listen for any user interaction to unlock audio
     function unlockListener(e) {
