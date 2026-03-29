@@ -15,10 +15,11 @@ Features:
 I built this app to remind myself to drink water because I forget to stay hydrated when I am deeply focused on work or study. It helps me keep my energy and focus consistent while I am on my PC and tracks the time I spend on work and study. It also gives me practice in coding and product development.
 
 ## Install
-Installers are located under GitHub Releases, you can download and try it in your Windows or Mac.
 
-### macOS (DMG):
-1) Download `Focus Mode-<version>-arm64.dmg`.
+⬇️ **[Download the latest version here](https://github.com/adhikariganesh9813/FocusMode-Productivity-App-for-PC-/releases/latest)**
+
+### macOS (Universal DMG):
+1) Download the latest `Focus Mode-<version>-universal.dmg`.
 2) Double-click the DMG to open it.
 3) Drag "Focus Mode" into the Applications folder.
 4) **Important:** If macOS says the app is "damaged" or can't be opened:
@@ -32,7 +33,7 @@ Installers are located under GitHub Releases, you can download and try it in you
    - Confirm Open, then enter your Mac password
 
 ### Windows (EXE):
-1) Download `Focus Mode Setup <version>-arm64.exe`.
+1) Download the latest `Focus Mode Setup <version>-x64.exe`.
 2) Double-click the installer.
 3) Follow the on-screen prompts.
 4) Launch from the Start Menu.
