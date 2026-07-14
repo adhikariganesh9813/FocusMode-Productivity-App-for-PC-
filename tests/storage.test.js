@@ -64,8 +64,8 @@ test('migration preserves legacy history and date-key totals', async () => {
   const migrated = await storage.migrateIfNeeded();
   const migratedRaw = adapter.getState();
 
-  assert.equal(migrated.schemaVersion, 2);
-  assert.equal(migratedRaw.schemaVersion, 2);
+  assert.equal(migrated.schemaVersion, 3);
+  assert.equal(migratedRaw.schemaVersion, 3);
   assert.equal(migratedRaw.dailyRecords['2026-01-26'].totalFocusSeconds, 2400);
   assert.equal(migratedRaw.dailyRecords['2026-01-27'].totalFocusSeconds, 1800);
   assert.equal(migratedRaw.sessionHistory.length, 1);
@@ -165,4 +165,64 @@ test('range and weekly/monthly/yearly aggregations are consistent', async () => 
   assert.equal(weeklyAverage, 771);
   assert.equal(januaryTotal, 5400);
   assert.equal(yearTotal, 14400);
+});
+
+test('paused/multi-day session does not inflate daily totals beyond focused time', async () => {
+  const adapter = createMemoryAdapter();
+  const clock = createClock('2026-07-02T12:00:00');
+  const storage = createStorage({
+    readRawStats: adapter.readRawStats,
+    writeRawStats: adapter.writeRawStats,
+    now: clock.now
+  });
+
+  // Wall-clock span covers ~5 days (paused / app left open), but only 1h was focused.
+  await storage.recordCompletedSession(
+    makeSession('paused-1', '2026-06-27T21:00:00', '2026-07-02T00:30:00', 3600)
+  );
+
+  const range = await storage.getRange('2026-06-27', '2026-07-02');
+  const total = range.reduce((sum, day) => sum + day.totalFocusSeconds, 0);
+  assert.equal(total, 3600);
+  range.forEach((day) => assert.ok(day.totalFocusSeconds <= 3600));
+});
+
+test('v2 -> v3 migration repairs focus totals inflated by the wall-clock bug', async () => {
+  const inflatedV2 = {
+    schemaVersion: 2,
+    sessionHistory: [
+      makeSession('paused-1', '2026-06-27T21:00:00', '2026-07-02T00:30:00', 3600)
+    ],
+    dailyRecords: {
+      '2026-06-27': { totalFocusSeconds: 10800, sessionsCount: 1, waterBreaksTaken: 2, lastUpdatedAt: null },
+      '2026-06-28': { totalFocusSeconds: 86400, sessionsCount: 0, waterBreaksTaken: 0, lastUpdatedAt: null },
+      '2026-06-29': { totalFocusSeconds: 86400, sessionsCount: 0, waterBreaksTaken: 0, lastUpdatedAt: null },
+      '2026-06-30': { totalFocusSeconds: 86400, sessionsCount: 0, waterBreaksTaken: 1, lastUpdatedAt: null },
+      '2026-07-01': { totalFocusSeconds: 86400, sessionsCount: 0, waterBreaksTaken: 0, lastUpdatedAt: null },
+      '2026-07-02': { totalFocusSeconds: 1800, sessionsCount: 0, waterBreaksTaken: 0, lastUpdatedAt: null }
+    },
+    lastActiveDateKey: '2026-07-02'
+  };
+  const adapter = createMemoryAdapter(inflatedV2);
+  const clock = createClock('2026-07-02T12:00:00');
+  const storage = createStorage({
+    readRawStats: adapter.readRawStats,
+    writeRawStats: adapter.writeRawStats,
+    now: clock.now
+  });
+
+  const migrated = await storage.migrateIfNeeded();
+  assert.equal(migrated.schemaVersion, 3);
+
+  const range = await storage.getRange('2026-06-27', '2026-07-02');
+  const total = range.reduce((sum, day) => sum + day.totalFocusSeconds, 0);
+  assert.equal(total, 3600);
+  range.forEach((day) => assert.ok(day.totalFocusSeconds <= 3600));
+
+  // The single session is counted once, on its start day.
+  const day27 = await storage.getDaily('2026-06-27');
+  assert.equal(day27.sessionsCount, 1);
+  // Water breaks are not derivable from history, so they survive the repair.
+  const day30 = await storage.getDaily('2026-06-30');
+  assert.equal(day30.waterBreaksTaken, 1);
 });

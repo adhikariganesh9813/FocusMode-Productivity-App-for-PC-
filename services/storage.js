@@ -1,5 +1,5 @@
 (function (global) {
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   const STREAK_THRESHOLD_SECONDS = 30 * 60;
   const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -140,22 +140,45 @@
   }
 
   function splitSessionByDay(session) {
-    const { startMs, endMs } = parseSessionTimes(session);
+    const { startMs, endMs, durationSeconds } = parseSessionTimes(session);
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
       return [];
     }
-    const chunks = [];
+    // Break the wall-clock span into per-calendar-day chunks.
+    const wallChunks = [];
     let cursor = new Date(startMs);
     const end = new Date(endMs);
+    let totalWallSeconds = 0;
     while (cursor < end) {
       const dayStart = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate());
       const nextDayStart = new Date(dayStart.getTime() + MS_PER_DAY);
       const segmentEnd = nextDayStart < end ? nextDayStart : end;
       const seconds = Math.max(0, Math.floor((segmentEnd.getTime() - cursor.getTime()) / 1000));
-      chunks.push({ dayKey: toLocalDayKey(cursor), seconds });
+      wallChunks.push({ dayKey: toLocalDayKey(cursor), seconds });
+      totalWallSeconds += seconds;
       cursor = segmentEnd;
     }
-    return chunks;
+    // durationSeconds is the actual focused time (pauses and app-closed gaps already
+    // removed), so it can be far smaller than the wall-clock span. Distribute it across
+    // the day chunks in proportion to each day's wall-clock share so daily totals never
+    // exceed the real focused time. Without this, a session that was paused for hours (or
+    // spanned days) would inflate a single day toward 24h.
+    const target = asNonNegativeInt(durationSeconds);
+    if (totalWallSeconds <= 0) {
+      return wallChunks.map((chunk) => ({ dayKey: chunk.dayKey, seconds: 0 }));
+    }
+    if (target >= totalWallSeconds) {
+      // Session ran continuously (no gap to remove); keep the exact wall-clock split.
+      return wallChunks;
+    }
+    let allocated = 0;
+    return wallChunks.map((chunk, index) => {
+      const seconds = index === wallChunks.length - 1
+        ? Math.max(0, target - allocated)
+        : Math.round((chunk.seconds / totalWallSeconds) * target);
+      allocated += seconds;
+      return { dayKey: chunk.dayKey, seconds };
+    });
   }
 
   function addHistoryIntoDailyRecords(dailyRecords, sessions, now) {
@@ -245,7 +268,44 @@
     return base;
   }
 
-  function migrateToV2(raw, now = new Date()) {
+  // v2 stored daily focus totals using the wall-clock span between a session's start and
+  // end. Any session that was paused (or left open while the app was closed) therefore
+  // inflated the affected days — a single session spanning several days could push each
+  // day toward a full 24h. sessionHistory kept the correct pause-adjusted durationSeconds,
+  // so rebuild the daily focus totals and session counts from it. Water breaks cannot be
+  // reconstructed from history, so those are preserved from the stored daily records.
+  function repairInflatedFocusTotals(raw, now) {
+    const state = emptyState(now);
+    state.createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : state.createdAt;
+    state.migratedAt = nowIso(now);
+    state.migrationSourceVersion = 2;
+    state.sessionHistory = dedupeSessions(raw.sessionHistory);
+
+    const rebuilt = {};
+    const rawDaily = raw.dailyRecords && typeof raw.dailyRecords === 'object' ? raw.dailyRecords : {};
+    Object.keys(rawDaily).forEach((dayKey) => {
+      if (!isDayKey(dayKey)) return;
+      const incoming = normalizeDailyRecord(rawDaily[dayKey], dayKey);
+      rebuilt[dayKey] = createDailyRecord(dayKey, now);
+      rebuilt[dayKey].waterBreaksTaken = incoming.waterBreaksTaken;
+      rebuilt[dayKey].lastUpdatedAt = incoming.lastUpdatedAt;
+    });
+    addHistoryIntoDailyRecords(rebuilt, state.sessionHistory, now);
+    state.dailyRecords = rebuilt;
+
+    state.runtime = normalizeRuntime(raw.runtime);
+    state.totalWaterBreaks = asNonNegativeInt(raw.totalWaterBreaks);
+    state.lastSessionSeconds = asNonNegativeInt(raw.lastSessionSeconds);
+    state.lastSessionRecordedAt = typeof raw.lastSessionRecordedAt === 'string' ? raw.lastSessionRecordedAt : null;
+    state.resetAt = typeof raw.resetAt === 'string' ? raw.resetAt : null;
+    state.lastActiveDateKey = isDayKey(raw.lastActiveDateKey)
+      ? raw.lastActiveDateKey
+      : (findLatestDayKey(state.dailyRecords) || toLocalDayKey(now));
+    ensureDayRecord(state, state.lastActiveDateKey, now);
+    return { state: normalizeV2State(state, now), changed: true };
+  }
+
+  function migrateState(raw, now = new Date()) {
     if (raw && typeof raw === 'object' && raw.schemaVersion === SCHEMA_VERSION) {
       const normalized = normalizeV2State(raw, now);
       const changed = JSON.stringify(normalized) !== JSON.stringify(raw);
@@ -253,6 +313,9 @@
     }
     if (!raw || typeof raw !== 'object') {
       return { state: emptyState(now), changed: true };
+    }
+    if (raw.schemaVersion === 2) {
+      return repairInflatedFocusTotals(raw, now);
     }
 
     const state = emptyState(now);
@@ -407,7 +470,7 @@
       if (cache) return cache;
       const now = nowProvider();
       const raw = await readRawStats();
-      const migrated = migrateToV2(raw, now);
+      const migrated = migrateState(raw, now);
       cache = migrated.state;
       if (migrated.changed) {
         await writeRawStats(cache);
@@ -650,7 +713,7 @@
         parseDayKey,
         addDays,
         splitSessionByDay,
-        migrateToV2,
+        migrateState,
         normalizeV2State,
         enumerateDayKeys,
         buildActivityMaps,

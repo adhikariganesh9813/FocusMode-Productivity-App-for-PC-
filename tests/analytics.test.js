@@ -25,6 +25,22 @@ test('splitSessionByDay splits across midnight', () => {
   assert.equal(total, 7200);
 });
 
+test('splitSessionByDay distributes focused time, not wall-clock span, for paused sessions', () => {
+  // 5 min focused, but 3h of wall-clock (long pause) — daily total must equal 300s.
+  const session = makeSession('2024-01-01T10:00:00', '2024-01-01T13:00:00', 300);
+  const chunks = analytics.splitSessionByDay(session);
+  const total = chunks.reduce((acc, chunk) => acc + chunk.seconds, 0);
+  assert.equal(total, 300);
+});
+
+test('splitSessionByDay caps a multi-day paused session to the focused duration', () => {
+  const session = makeSession('2024-01-01T22:00:00', '2024-01-03T02:00:00', 3600);
+  const chunks = analytics.splitSessionByDay(session);
+  const total = chunks.reduce((acc, chunk) => acc + chunk.seconds, 0);
+  assert.equal(total, 3600);
+  chunks.forEach((chunk) => assert.ok(chunk.seconds <= 3600));
+});
+
 test('filterSessionsByRange includes overlapping sessions', () => {
   const sessions = [
     makeSession('2024-01-01T10:00:00', '2024-01-01T10:30:00'),

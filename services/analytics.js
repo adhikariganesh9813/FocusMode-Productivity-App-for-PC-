@@ -32,22 +32,43 @@
   }
 
   function splitSessionByDay(session) {
-    const { startMs, endMs } = parseSessionTimes(session);
+    const { startMs, endMs, durationSeconds } = parseSessionTimes(session);
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
       return [];
     }
-    const chunks = [];
+    // Break the wall-clock span into per-calendar-day chunks.
+    const wallChunks = [];
     let cursor = new Date(startMs);
     const end = new Date(endMs);
+    let totalWallSeconds = 0;
     while (cursor < end) {
       const dayStart = toLocalDayStart(cursor);
       const nextDayStart = new Date(dayStart.getTime() + MS_PER_DAY);
       const segmentEnd = nextDayStart < end ? nextDayStart : end;
       const seconds = Math.max(0, Math.floor((segmentEnd - cursor) / 1000));
-      chunks.push({ dayKey: toDayKey(cursor), seconds });
+      wallChunks.push({ dayKey: toDayKey(cursor), seconds });
+      totalWallSeconds += seconds;
       cursor = segmentEnd;
     }
-    return chunks;
+    // durationSeconds is the actual focused time (paused/idle gaps already removed), so it
+    // can be far smaller than the wall-clock span. Distribute it across the day chunks in
+    // proportion to each day's wall-clock share so a paused or multi-day session never
+    // inflates a day's total beyond the real focused time.
+    const target = Math.max(0, Math.round(durationSeconds || 0));
+    if (totalWallSeconds <= 0) {
+      return wallChunks.map((chunk) => ({ dayKey: chunk.dayKey, seconds: 0 }));
+    }
+    if (target >= totalWallSeconds) {
+      return wallChunks;
+    }
+    let allocated = 0;
+    return wallChunks.map((chunk, index) => {
+      const seconds = index === wallChunks.length - 1
+        ? Math.max(0, target - allocated)
+        : Math.round((chunk.seconds / totalWallSeconds) * target);
+      allocated += seconds;
+      return { dayKey: chunk.dayKey, seconds };
+    });
   }
 
   function getDateRange(rangeKey, customStart, customEnd, now = new Date()) {
