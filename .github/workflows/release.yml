@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'
+  # Allow a manual run (from a branch) to build and publish the version in package.json.
+  workflow_dispatch: {}
 
 permissions:
   contents: write

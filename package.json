@@ -21,6 +21,12 @@
   "build": {
     "appId": "com.focusmode.app",
     "productName": "Focus Mode",
+    "publish": [
+      {
+        "provider": "github",
+        "releaseType": "release"
+      }
+    ],
     "files": [
       "**/*",
       "!tests",
